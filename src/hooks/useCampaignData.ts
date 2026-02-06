@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { startOfDay, endOfDay, subDays } from 'date-fns';
 import {
   parseCSV,
   CampaignData,
@@ -27,14 +28,22 @@ export interface DashboardMetrics {
   ctr: number;
 }
 
+// Função para garantir que strings "AAAA-MM-DD" sejam lidas como horário local
+const toLocalDate = (dateInput: string | Date) => {
+  if (dateInput instanceof Date) return dateInput;
+  const [year, month, day] = dateInput.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+
 export function useCampaignData() {
   const [rawData, setRawData] = useState<CampaignData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Estado inicial padrão (Ontem - 7 dias)
   const [dateRange, setDateRange] = useState<DateRange>(() => {
-    const to = new Date();
-    const from = new Date();
-    from.setDate(to.getDate() - 30);
+    const to = endOfDay(subDays(new Date(), 1));
+    const from = startOfDay(subDays(to, 7)); // Janela de 7 dias terminando ontem
     return { from, to };
   });
 
@@ -46,7 +55,14 @@ export function useCampaignData() {
         if (!response.ok) throw new Error('Failed to fetch data');
         const text = await response.text();
         const parsed = parseCSV(text);
-        setRawData(parsed);
+        
+        // Normalização das datas do CSV para evitar o bug de fuso horário
+        const normalizedData = parsed.map(item => ({
+          ...item,
+          date: toLocalDate(item.date)
+        }));
+
+        setRawData(normalizedData);
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -68,8 +84,8 @@ export function useCampaignData() {
 
     return {
       ...agg,
-      avgCPA,
-      ctr,
+      avgCPA: Number(avgCPA.toFixed(2)),
+      ctr: Number(ctr.toFixed(2)),
     };
   }, [filteredData]);
 
@@ -85,7 +101,7 @@ export function useCampaignData() {
     if (rawData.length === 0) return null;
 
     const dates = rawData
-      .map(d => new Date(d.date))
+      .map(d => toLocalDate(d.date))
       .filter(d => !isNaN(d.getTime()))
       .sort((a, b) => a.getTime() - b.getTime());
 
